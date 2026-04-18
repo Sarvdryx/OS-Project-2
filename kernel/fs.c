@@ -382,8 +382,8 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *a, *a1, *a2;
+  struct buf *bp, *bp1, *bp2;
 
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0){
@@ -417,6 +417,47 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  bn -= NINDIRECT;
+  if(bn < NINDIRECT*NINDIRECT){
+    if((addr = ip->addrs[NDIRECT+1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = addr;
+    }
+
+    bp1 = bread(ip->dev, addr);
+    a1 = (uint*)bp1->data;
+
+    int index1 = bn/NINDIRECT;
+    if((addr = a1[index1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a1[index1] = addr;
+        log_write(bp1);
+      }
+      else{
+        brelse(bp1);
+        return 0;
+      }
+    }
+    brelse(bp1);
+
+    bp2=bread(ip->dev, addr);
+    a2 = (uint*)bp2->data;
+
+    int index2 = bn % NINDIRECT;
+    if((addr = a2[index2]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a2[index2] = addr;
+        log_write(bp2);
+      }
+    }
+    brelse(bp2);
+    return addr;
+  }
+
   panic("bmap: out of range");
 }
 
@@ -426,8 +467,8 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp1, *bp2;
+  uint *a, *a1, *a2;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -446,6 +487,27 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT+1]){
+    bp1 = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a1 = (uint*)bp1->data;
+    for (i = 0; i < NINDIRECT; i++){
+      if(a1[i]){
+        bp2 = bread(ip->dev, a1[i]);
+        a2 = (uint*)bp2->data;
+        for (j = 0; j<NINDIRECT; j++){
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a1[i]);
+        a1[i] = 0;
+      }
+    }
+    brelse(bp1);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NINDIRECT+1] = 0;
   }
 
   ip->size = 0;
