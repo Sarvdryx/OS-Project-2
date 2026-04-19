@@ -488,9 +488,39 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 
 #ifdef LAB_PGTBL
+
+static void
+vmprintlevel(pagetable_t pagetable, int depth)
+{
+  // 512 PTEs in a page table page.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(!(pte & PTE_V))
+      continue;  // skip invalid entries
+
+    // Print indent
+    for(int d = 2; d > depth; d--)
+      printf(".. ");
+    printf("..%d: pte %p pa %p\n", i, (void*)pte, (void*)PTE2PA(pte)); // PTE2PA(pte) la physical address lay tu riscv.h
+
+    // If this PTE has no R/W/X bits it is a pointer to a lower-level
+    // page-table page (non-leaf), so recurse one level down.
+    if((pte & (PTE_R | PTE_W | PTE_X)) == 0 && depth > 0){
+      pagetable_t child = (pagetable_t)PTE2PA(pte);
+      vmprintlevel(child, depth - 1);
+    }
+  }
+}
+
+// Print the contents of a page table, starting from the root (level 2).
+// Only valid PTEs are shown. Non-leaf PTEs (pointing to sub-tables) are
+// printed and then recursed into; leaf PTEs (pointing to real pages) are
+// printed and traversal stops.
 void
-vmprint(pagetable_t pagetable) {
-  // your code here
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  vmprintlevel(pagetable, 2);
 }
 #endif
 
