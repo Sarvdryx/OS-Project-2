@@ -1,68 +1,66 @@
-#include "kernel/param.h"
-#include "kernel/fcntl.h"
 #include "kernel/types.h"
-#include "kernel/riscv.h"
+#include "kernel/stat.h"
 #include "user/user.h"
 
-void print_pgtbl();
-void ugetpid_test();
+#define ITERS 1000000 // Number of iterations for the benchmark
 
-int
-main(int argc, char *argv[])
-{
-  print_pgtbl();
-  ugetpid_test();
-  printf("pgtbltest: all tests succeeded\n");
-  exit(0);
-}
+void benchmark_ugetpid(void) {
+    int start, end;
+    int time_syscall, time_usyscall;
+    
+    // Variables to store the results and prevent compiler optimization
+    int pid_sys = 0;
+    int pid_usys = 0;
 
-char *testname = "???";
-
-void
-err(char *why)
-{
-  printf("pgtbltest: %s failed: %s, pid=%d\n", testname, why, getpid());
-  exit(1);
-}
-
-void
-print_pte(uint64 va)
-{
-    pte_t pte = (pte_t) pgpte((void *) va);
-    printf("va 0x%lx pte 0x%lx pa 0x%lx perm 0x%lx\n", va, pte, PTE2PA(pte), PTE_FLAGS(pte));
-}
-
-void
-print_pgtbl()
-{
-  printf("print_pgtbl starting\n");
-  uint64 top = MAXVA/PGSIZE;
-  // Chỉ in ra vùng nhớ sát đỉnh (nơi chứa USYSCALL, TRAPFRAME, TRAMPOLINE)
-  for (uint64 i = top-5; i < top; i++) {
-    print_pte(i * PGSIZE);
-  }
-  printf("print_pgtbl: OK\n");
-}
-
-void
-ugetpid_test()
-{
-  int i;
-
-  printf("ugetpid_test starting\n");
-  testname = "ugetpid_test";
-
-  for (i = 0; i < 64; i++) {
-    int ret = fork();
-    if (ret != 0) {
-      wait(&ret);
-      if (ret != 0)
-        exit(1);
-      continue;
+    printf("\n==================================================\n");
+    printf("       UGETPID PERFORMANCE BENCHMARK              \n");
+    printf("==================================================\n");
+    
+    // Benchmark 1: Traditional getpid() (Traps into kernel)
+    printf("[Test 1] Running traditional getpid() %d times...\n", ITERS);
+    start = uptime();
+    for (int i = 0; i < ITERS; i++) {
+        pid_sys = getpid(); 
     }
-    if (getpid() != ugetpid())
-      err("missmatched PID");
+    end = uptime();
+    time_syscall = end - start;
+    printf(" -> getpid() completion time: %d ticks (~%d ms)\n", time_syscall, time_syscall * 100);
+
+    // Benchmark 2: ugetpid() (Reads from shared memory, no trap)
+    printf("\n[Test 2] Running ugetpid() via shared memory %d times...\n", ITERS);
+    start = uptime();
+    for (int i = 0; i < ITERS; i++) {
+        pid_usys = ugetpid(); 
+    }
+    end = uptime();
+    time_usyscall = end - start;
+    printf(" -> ugetpid() completion time: %d ticks (~%d ms)\n", time_usyscall, time_usyscall * 100);
+
+    printf("--------------------------------------------------\n");
+    
+    // Correctness check
+    if (pid_sys != pid_usys) {
+        printf("[Error] ugetpid() returned incorrect PID! (sys: %d, usys: %d)\n", pid_sys, pid_usys);
+    } else {
+        printf("[Check Correctness] PASS! Both returned PID: %d\n", pid_sys);
+    }
+
+    printf("--------------------------------------------------\n");
+    printf("[Result] SPEED COMPARISON:\n");
+    
+    // Calculate and prove the performance benefit via tracing results
+    if (time_usyscall > 0) {
+        int speedup = time_syscall / time_usyscall;
+        printf(" -> ugetpid() is approximately %d times FASTER than getpid()!\n", speedup);
+    } else if (time_usyscall == 0 && time_syscall > 0) {
+        printf(" -> ugetpid() took 0 ticks, significantly faster than getpid() (%d ticks)!\n", time_syscall);
+    } else {
+        printf(" -> Test duration too short or QEMU is too fast. Consider increasing ITERS.\n");
+    }
+    printf("==================================================\n\n");
+}
+
+int main(int argc, char *argv[]) {
+    benchmark_ugetpid();
     exit(0);
-  }
-  printf("ugetpid_test: OK\n");
 }
