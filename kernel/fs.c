@@ -507,7 +507,7 @@ itrunc(struct inode *ip)
     }
     brelse(bp1);
     bfree(ip->dev, ip->addrs[NDIRECT+1]);
-    ip->addrs[NINDIRECT+1] = 0;
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;
